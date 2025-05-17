@@ -1,0 +1,16 @@
+{
+    "name": "docustream/docustream",
+    "description": "DocuStream document management system",
+    "require": {
+        "php": "^8.1",
+        "mongodb/mongodb": "^1.12",
+        "setasign/fpdi": "^2.3",
+        "setasign/fpdf": "^1.8"
+    },
+    "autoload": {
+        "psr-4": {
+            "DocuStream\\": "src/"
+        }
+    },
+    "minimum-stability": "stable"
+}
