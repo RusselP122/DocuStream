@@ -2,6 +2,11 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+
+// Generate CSRF token if not set
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 ?>
 
 <!DOCTYPE html>
@@ -12,34 +17,95 @@ if (session_status() === PHP_SESSION_NONE) {
     <title>DocuStream - Login</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-50 min-h-screen flex items-center justify-center">
-    <div class="bg-white p-6 rounded-lg shadow-md max-w-md w-full">
-        <h1 class="text-2xl font-bold text-gray-900 mb-6 text-center">Login</h1>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+    <div class="w-full max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 p-6">
+        <!-- Left Side: Form -->
+        <div class="bg-white p-8 rounded-xl shadow-lg max-w-md w-full mx-auto lg:mx-0">
+            <!-- Branding -->
+            <div class="text-center mb-6">
+                <h1 class="text-3xl font-bold text-gray-900">DocuStream</h1>
+                <p class="mt-2 text-sm text-gray-600">Secure Document Management</p>
+            </div>
 
-        <?php if (isset($error)): ?>
-            <div class="mb-4 p-4 bg-red-100 text-red-700 rounded-lg text-center" role="alert">
-                <?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?>
-            </div>
-        <?php endif; ?>
+            <!-- Error Message -->
+            <?php if (isset($error)): ?>
+                <div class="mb-6 p-4 bg-red-50 text-red-700 rounded-lg flex items-center" role="alert" aria-live="assertive">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <span><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></span>
+                </div>
+            <?php endif; ?>
 
-        <form method="POST" action="?action=login" class="space-y-4" aria-label="Login form">
-            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
-            <div>
-                <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
-                <input type="email" id="email" name="email" class="mt-1 block w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" required aria-required="true" maxlength="100">
+            <!-- Login Form -->
+            <form method="POST" action="?action=login" class="space-y-6" aria-label="Login form">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
+                <div>
+                    <label for="email" class="block text-sm font-semibold text-gray-700">Email</label>
+                    <div class="relative">
+                        <input 
+                            type="email" 
+                            id="email" 
+                            name="email" 
+                            class="mt-1 block w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors" 
+                            placeholder="Enter your email" 
+                            required 
+                            aria-required="true" 
+                            maxlength="100"
+                        >
+                        <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <label for="password" class="block text-sm font-semibold text-gray-700">Password</label>
+                    <div class="relative">
+                        <input 
+                            type="password" 
+                            id="password" 
+                            name="password" 
+                            class="mt-1 block w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors" 
+                            placeholder="Enter your password" 
+                            required 
+                            aria-required="true"
+                        >
+                        <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0-1.104-.896-2-2-2s-2 .896-2 2c0 .738.402 1.378 1 1.723V15h2v-2.277c.598-.345 1-.985 1-1.723zm9-2v6a2 2 0 01-2 2H5a2 2 0 01-2-2V9a2 2 0 012-2h1V5a4 4 0 018 0v2h1a2 2 0 012 2z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between">
+                    <a href="?action=forgot_password" class="text-sm text-blue-700 hover:text-blue-900 font-medium" aria-label="Forgot your password?">Forgot Password?</a>
+                    <button 
+                        type="submit" 
+                        class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+                    >
+                        Login
+                    </button>
+                </div>
+            </form>
+            <p class="mt-6 text-center text-sm text-gray-600">
+                Don't have an account? 
+                <a href="?action=register" class="text-blue-700 hover:text-blue-900 font-medium" aria-label="Register for a new account">Register</a>
+            </p>
+        </div>
+
+        <!-- Right Side: Decorative Element (Visible on Large Screens) -->
+        <div class="hidden lg:block bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl p-8 text-white">
+            <div class="max-w-md mx-auto">
+                <h2 class="text-2xl font-bold mb-4">Welcome to DocuStream</h2>
+                <p class="text-sm">
+                    Manage your documents securely and efficiently with our advanced document management system. Streamline your workflow today!
+                </p>
+                <!-- Placeholder for illustration or logo -->
+                <div class="mt-8 flex justify-center">
+                    <svg class="w-32 h-32 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                </div>
             </div>
-            <div>
-                <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
-                <input type="password" id="password" name="password" class="mt-1 block w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" required aria-required="true">
-            </div>
-            <div class="flex justify-between">
-                <a href="?action=forgot_password" class="text-sm text-blue-600 hover:text-blue-800">Forgot Password?</a>
-                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Login</button>
-            </div>
-        </form>
-        <p class="mt-4 text-center text-sm text-gray-600">
-            Don't have an account? <a href="?action=register" class="text-blue-600 hover:text-blue-800">Register</a>
-        </p>
+        </div>
     </div>
 </body>
 </html>

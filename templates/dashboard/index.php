@@ -20,12 +20,40 @@ try {
         'status' => 'approved',
         'uploaded_at' => ['$gte' => $weekStart]
     ]);
-    $recentDocs = iterator_to_array($document->search('', '', [], [], ['uploaded_at' => -1], 5));
+
+    // Get sorting and filtering parameters
+    $sortBy = isset($_GET['sort_by']) ? $_GET['sort_by'] : 'uploaded_at';
+    $sortOrder = isset($_GET['sort_order']) && $_GET['sort_order'] === 'asc' ? 1 : -1;
+    $filterType = isset($_GET['filter_type']) ? $_GET['filter_type'] : '';
+
+    // Pagination parameters
+    $docsPerPage = 5; // Number of documents per page
+    $currentPage = isset($_GET['page']) && is_numeric($_GET['page']) && $_GET['page'] > 0 ? (int)$_GET['page'] : 1;
+    $skip = ($currentPage - 1) * $docsPerPage;
+
+    // Build sort criteria
+    $sortCriteria = [$sortBy => $sortOrder];
+
+    // Build filter criteria
+    $filterCriteria = ['user_id' => $_SESSION['user_id']];
+    if ($filterType) {
+        $filterCriteria['file_type'] = $filterType;
+    }
+
+    // Get total number of documents for pagination
+    $totalDocs = $document->getDocumentsCount($filterCriteria);
+    $totalPages = ceil($totalDocs / $docsPerPage);
+
+    // Fetch documents for the current page
+    $recentDocs = iterator_to_array($document->search('', '', $filterCriteria, [], $sortCriteria, $docsPerPage, $skip));
 } catch (\Exception $e) {
     error_log("Dashboard error: " . $e->getMessage());
     $username = 'Guest';
     $newDocsCount = 0;
     $recentDocs = [];
+    $totalDocs = 0;
+    $totalPages = 1;
+    $currentPage = 1;
 }
 ?>
 
@@ -66,7 +94,7 @@ try {
             <?php if ($auth->hasPermission('upload')): ?>
                 <button id="open-upload-modal" class="inline-flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition" aria-label="Open upload modal">
                     <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></<Action></path>
                     </svg>
                     Upload New
                 </button>
@@ -162,8 +190,34 @@ try {
         </div>
 
         <div class="bg-white rounded-lg shadow">
-            <div class="px-6 py-4 border-b border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <h3 class="text-lg font-medium text-gray-900">Recent Documents</h3>
+                <div class="flex space-x-4">
+                    <div>
+                        <label for="sort_by" class="sr-only">Sort by</label>
+                        <select id="sort_by" name="sort_by" onchange="updateSortFilter()" class="p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                            <option value="uploaded_at" <?php echo $sortBy === 'uploaded_at' ? 'selected' : ''; ?>>Date</option>
+                            <option value="original_name" <?php echo $sortBy === 'original_name' ? 'selected' : ''; ?>>Name</option>
+                            <option value="file_type" <?php echo $sortBy === 'file_type' ? 'selected' : ''; ?>>File Type</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="sort_order" class="sr-only">Sort order</label>
+                        <select id="sort_order" name="sort_order" onchange="updateSortFilter()" class="p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                            <option value="desc" <?php echo $sortOrder === -1 ? 'selected' : ''; ?>>Descending</option>
+                            <option value="asc" <?php echo $sortOrder === 1 ? 'selected' : ''; ?>>Ascending</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="filter_type" class="sr-only">Filter by file type</label>
+                        <select id="filter_type" name="filter_type" onchange="updateSortFilter()" class="p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                            <option value="">All Types</option>
+                            <?php foreach (ALLOWED_FILE_TYPES as $type): ?>
+                                <option value="<?php echo htmlspecialchars($type, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $filterType === $type ? 'selected' : ''; ?>><?php echo htmlspecialchars(strtoupper($type), ENT_QUOTES, 'UTF-8'); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
             </div>
             <div class="divide-y divide-gray-200">
                 <?php if (empty($recentDocs)): ?>
@@ -214,6 +268,48 @@ try {
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>
+            <?php if ($totalPages > 1): ?>
+                <div class="px-6 py-4 flex items-center justify-between border-t border-gray-200">
+                    <div class="flex-1 flex justify-between sm:justify-end">
+                        <div class="mr-4 text-sm text-gray-700">
+                            Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?>
+                        </div>
+                        <div class="flex space-x-2">
+                            <?php
+                            $params = $_GET;
+                            $params['page'] = max(1, $currentPage - 1);
+                            $prevUrl = '?' . http_build_query($params);
+                            $params['page'] = min($totalPages, $currentPage + 1);
+                            $nextUrl = '?' . http_build_query($params);
+                            ?>
+                            <a href="<?php echo htmlspecialchars($prevUrl, ENT_QUOTES, 'UTF-8'); ?>" 
+                               class="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 <?php echo $currentPage === 1 ? 'opacity-50 cursor-not-allowed' : ''; ?>" 
+                               <?php echo $currentPage === 1 ? 'aria-disabled="true"' : ''; ?>>
+                                Previous
+                            </a>
+                            <?php
+                            // Show up to 5 page numbers, centered around current page
+                            $startPage = max(1, $currentPage - 2);
+                            $endPage = min($totalPages, $startPage + 4);
+                            $startPage = max(1, $endPage - 4);
+                            for ($i = $startPage; $i <= $endPage; $i++):
+                                $params['page'] = $i;
+                                $pageUrl = '?' . http_build_query($params);
+                            ?>
+                                <a href="<?php echo htmlspecialchars($pageUrl, ENT_QUOTES, 'UTF-8'); ?>" 
+                                   class="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md <?php echo $i === $currentPage ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white hover:bg-gray-50'; ?>">
+                                    <?php echo $i; ?>
+                                </a>
+                            <?php endfor; ?>
+                            <a href="<?php echo htmlspecialchars($nextUrl, ENT_QUOTES, 'UTF-8'); ?>" 
+                               class="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 <?php echo $currentPage === $totalPages ? 'opacity-50 cursor-not-allowed' : ''; ?>" 
+                               <?php echo $currentPage === $totalPages ? 'aria-disabled="true"' : ''; ?>>
+                                Next
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
         </div>
 
         <div class="bg-white rounded-lg shadow mt-8">
@@ -308,6 +404,20 @@ try {
                 modal.classList.add('hidden');
             }
         });
+
+        function updateSortFilter() {
+            const sortBy = document.getElementById('sort_by').value;
+            const sortOrder = document.getElementById('sort_order').value;
+            const filterType = document.getElementById('filter_type').value;
+
+            const params = new URLSearchParams();
+            if (sortBy) params.set('sort_by', sortBy);
+            if (sortOrder) params.set('sort_order', sortOrder);
+            if (filterType) params.set('filter_type', filterType);
+            params.set('page', '1'); // Reset to page 1 on sort/filter change
+
+            window.location.href = '?' + params.toString();
+        }
     </script>
 </body>
 </html>
