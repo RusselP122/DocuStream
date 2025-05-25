@@ -167,7 +167,7 @@ class Document
         }
     }
 
-    public function rejectDocument($documentId)
+public function rejectDocument($documentId)
     {
         try {
             if (!preg_match('/^[a-f\d]{24}$/i', $documentId)) {
@@ -177,28 +177,19 @@ class Document
             if (!$doc) {
                 return false;
             }
-            $result = $this->trashCollection->insertOne([
-                'file_name' => $doc['file_name'],
-                'original_name' => $doc['original_name'],
-                'category' => $doc['category'],
-                'metadata' => $doc['metadata'],
-                'user_id' => $doc['user_id'],
-                'status' => 'rejected',
-                'uploaded_at' => $doc['uploaded_at'],
-                'archived' => $doc['archived'],
-                'deleted_at' => new UTCDateTime()
-            ]);
-            if ($result->getInsertedCount() === 1) {
-                $this->documentsCollection->deleteOne(['_id' => new ObjectId($documentId)]);
-                return true;
+            // Delete the associated file from the filesystem
+            $filePath = UPLOAD_DIR . $doc['file_name'];
+            if (file_exists($filePath)) {
+                unlink($filePath);
             }
-            return false;
+            // Permanently delete from the documents collection
+            $result = $this->documentsCollection->deleteOne(['_id' => new ObjectId($documentId)]);
+            return $result->getDeletedCount() === 1;
         } catch (\Exception $e) {
             error_log("Reject error: " . $e->getMessage());
             return false;
         }
     }
-
     public function restore($documentId)
     {
         try {

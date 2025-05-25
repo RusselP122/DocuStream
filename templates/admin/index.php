@@ -87,48 +87,48 @@ if (empty($_SESSION['csrf_token'])) {
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                         <?php echo !empty($user['isAdmin']) && $user['isAdmin'] ? 'Admin' : 'User'; ?>
                                     </td>
-  <td class="px-6 py-4 text-sm">
-    <div class="flex flex-wrap gap-2">
-        <?php
-        // Use permissions as-is (already a PHP array)
-        $userPermissions = is_array($user['permissions']) ? $user['permissions'] : [];
-        
-        // Define badge colors for permissions
-        $colorMap = [
-            'upload' => 'blue',
-            'view' => 'purple',
-            'download' => 'indigo',
-            'archive' => 'yellow',
-            'delete' => 'red'
-        ];
-        
-        // If user has permissions, display them; otherwise, show "None"
-        if (!empty($userPermissions)) {
-            foreach ($userPermissions as $perm) {
-                // Only display valid permissions
-                if (in_array($perm, VALID_PERMISSIONS)) {
-                    $color = $colorMap[$perm] ?? 'gray';
-                    $badgeClass = "bg-{$color}-100 text-{$color}-800";
-                    ?>
-                    <span class="px-2.5 py-1.5 rounded-full text-xs font-medium <?php echo $badgeClass; ?>">
-                        <svg class="w-4 h-4 inline mr-1.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                        </svg>
-                        <?php echo ucfirst(htmlspecialchars($perm, ENT_QUOTES, 'UTF-8')); ?>
-                    </span>
-                    <?php
-                }
-            }
-        } else {
-            ?>
-            <span class="px-2.5 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-400">
-                None
-            </span>
-            <?php
-        }
-        ?>
-    </div>
-</td>
+                                    <td class="px-6 py-4 text-sm">
+                                        <div class="flex flex-wrap gap-2">
+                                            <?php
+                                            // Use permissions as-is (already a PHP array)
+                                            $userPermissions = is_array($user['permissions']) ? $user['permissions'] : [];
+                                            
+                                            // Define badge colors for permissions
+                                            $colorMap = [
+                                                'upload' => 'blue',
+                                                'view' => 'purple',
+                                                'download' => 'indigo',
+                                                'archive' => 'yellow',
+                                                'delete' => 'red'
+                                            ];
+                                            
+                                            // If user has permissions, display them; otherwise, show "None"
+                                            if (!empty($userPermissions)) {
+                                                foreach ($userPermissions as $perm) {
+                                                    // Only display valid permissions
+                                                    if (in_array($perm, \DocuStream\Auth\VALID_PERMISSIONS)) {
+                                                        $color = $colorMap[$perm] ?? 'gray';
+                                                        $badgeClass = "bg-{$color}-100 text-{$color}-800";
+                                                        ?>
+                                                        <span class="px-2.5 py-1.5 rounded-full text-xs font-medium <?php echo $badgeClass; ?>">
+                                                            <svg class="w-4 h-4 inline mr-1.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                                                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                                            </svg>
+                                                            <?php echo ucfirst(htmlspecialchars($perm, ENT_QUOTES, 'UTF-8')); ?>
+                                                        </span>
+                                                        <?php
+                                                    }
+                                                }
+                                            } else {
+                                                ?>
+                                                <span class="px-2.5 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-400">
+                                                    None
+                                                </span>
+                                                <?php
+                                            }
+                                            ?>
+                                        </div>
+                                    </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <a href="?action=edit_user&id=<?php echo htmlspecialchars((string)($user['_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" class="text-blue-600 hover:text-blue-900">Edit</a>
                                     </td>
@@ -199,7 +199,7 @@ if (empty($_SESSION['csrf_token'])) {
                                            onclick="return confirmAction('Are you sure you want to approve this document?');"
                                            class="text-green-600 hover:text-green-900 mr-3">Approve</a>
                                         <a href="?action=reject_document&id=<?php echo htmlspecialchars((string)($doc['_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>&csrf_token=<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>"
-                                           onclick="return confirmAction('Are you sure you want to reject this document?');"
+                                           onclick="return confirmAction('Are you sure you want to permanently delete this document? This action cannot be undone.');"
                                            class="text-red-600 hover:text-red-900">Reject</a>
                                     </td>
                                 </tr>
