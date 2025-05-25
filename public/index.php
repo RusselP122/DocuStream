@@ -12,8 +12,15 @@ require_once __DIR__ . '/../src/Document/Document.php';
 use DocuStream\Auth\Auth;
 use DocuStream\Document\Document;
 
-$auth = new Auth();
-$document = new Document();
+try {
+    $auth = new Auth();
+    $document = new Document();
+} catch (\Exception $e) {
+    error_log("Initialization error: " . $e->getMessage());
+    $_SESSION['error'] = 'System error. Please try again later.';
+    header('Location: ?action=login');
+    exit;
+}
 
 // Generate CSRF token if not set
 if (empty($_SESSION['csrf_token'])) {
@@ -23,7 +30,7 @@ if (empty($_SESSION['csrf_token'])) {
 $action = filter_input(INPUT_GET, 'action', FILTER_SANITIZE_STRING) ?? 'dashboard';
 $protectedActions = [
     'dashboard', 'upload', 'search', 'admin', 'edit_user',
-    'view', 'download', 'archive', 'delete', 'restore',
+    'view', 'download', 'archive', 'unarchive', 'delete', 'restore',
     'approve_document', 'reject_document'
 ];
 
@@ -151,16 +158,29 @@ switch ($action) {
 
     case 'search':
         requirePermission($auth, 'view');
-        $keyword = filter_input(INPUT_GET, 'keyword', FILTER_SANITIZE_STRING) ?? '';
-        $category = filter_input(INPUT_GET, 'category', FILTER_SANITIZE_STRING) ?? '';
-        $metadata = isset($_GET['metadata']) && is_array($_GET['metadata'])
-            ? array_map('filter_var', $_GET['metadata'], array_fill(0, count($_GET['metadata']), FILTER_SANITIZE_STRING))
-            : [];
-        $dateRange = isset($_GET['date_range']) && is_array($_GET['date_range'])
-            ? array_map('filter_var', $_GET['date_range'], array_fill(0, count($_GET['date_range']), FILTER_SANITIZE_STRING))
-            : [];
-        $results = iterator_to_array($document->search($keyword, $category, $metadata, $dateRange));
-        include __DIR__ . '/../templates/dashboard/search.php';
+        try {
+            $keyword = filter_input(INPUT_GET, 'keyword', FILTER_SANITIZE_STRING) ?? '';
+            $category = filter_input(INPUT_GET, 'category', FILTER_SANITIZE_STRING) ?? '';
+            $metadata = isset($_GET['metadata']) && is_array($_GET['metadata'])
+                ? array_map('filter_var', $_GET['metadata'], array_fill(0, count($_GET['metadata']), FILTER_SANITIZE_STRING))
+                : [];
+            $dateRange = isset($_GET['date_range']) && is_array($_GET['date_range'])
+                ? array_map('filter_var', $_GET['date_range'], array_fill(0, count($_GET['date_range']), FILTER_SANITIZE_STRING))
+                : [];
+            $sortBy = filter_input(INPUT_GET, 'sort_by', FILTER_SANITIZE_STRING) ?? 'uploaded_at';
+            $sortOrder = filter_input(INPUT_GET, 'sort_order', FILTER_SANITIZE_STRING) === 'asc' ? 1 : -1;
+            $docsPerPage = 10;
+            $currentPage = max(1, (int)(filter_input(INPUT_GET, 'page', FILTER_SANITIZE_NUMBER_INT) ?? 1));
+            $skip = ($currentPage - 1) * $docsPerPage;
+            $sort = [$sortBy => $sortOrder];
+            $results = iterator_to_array($document->search($keyword, $category, $metadata, $dateRange, $sort, $docsPerPage));
+            include __DIR__ . '/../templates/dashboard/search.php';
+        } catch (\Exception $e) {
+            error_log("Search error: " . $e->getMessage());
+            $_SESSION['error'] = 'An error occurred while searching documents.';
+            $results = [];
+            include __DIR__ . '/../templates/dashboard/search.php';
+        }
         break;
 
     case 'view':
@@ -233,6 +253,21 @@ switch ($action) {
         header('Location: ?action=dashboard');
         exit;
 
+    case 'unarchive':
+        requirePermission($auth, 'archive');
+        $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+        if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId)) {
+            if ($document->unarchive($documentId)) {
+                $_SESSION['message'] = 'Document unarchived successfully.';
+            } else {
+                $_SESSION['error'] = 'Failed to unarchive document.';
+            }
+        } else {
+            $_SESSION['error'] = 'Invalid document ID.';
+        }
+        header('Location: ?action=dashboard');
+        exit;
+
     case 'delete':
         requirePermission($auth, 'delete');
         $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
@@ -263,6 +298,7 @@ switch ($action) {
         header('Location: ?action=dashboard');
         exit;
 
+        
     case 'approve_document':
         if ($auth->isAdmin()) {
             $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);

@@ -2,6 +2,7 @@
 namespace DocuStream\Document;
 
 use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\UTCDateTime;
 use DocuStream\Database\MongoDB;
 
 class Document
@@ -55,7 +56,7 @@ class Document
                 'metadata' => $metadata,
                 'user_id' => $userId,
                 'status' => $status,
-                'uploaded_at' => new \MongoDB\BSON\UTCDateTime(),
+                'uploaded_at' => new UTCDateTime(),
                 'archived' => false
             ]);
 
@@ -91,11 +92,28 @@ class Document
             }
             $result = $this->documentsCollection->updateOne(
                 ['_id' => new ObjectId($documentId)],
-                ['$set' => ['archived' => true]]
+                ['$set' => ['archived' => true, 'archived_at' => new UTCDateTime()]]
             );
             return $result->getModifiedCount() === 1;
         } catch (\Exception $e) {
             error_log("Archive error: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    public function unarchive($documentId)
+    {
+        try {
+            if (!preg_match('/^[a-f\d]{24}$/i', $documentId)) {
+                return false;
+            }
+            $result = $this->documentsCollection->updateOne(
+                ['_id' => new ObjectId($documentId)],
+                ['$set' => ['archived' => false], '$unset' => ['archived_at' => '']]
+            );
+            return $result->getModifiedCount() === 1;
+        } catch (\Exception $e) {
+            error_log("Unarchive error: " . $e->getMessage());
             return false;
         }
     }
@@ -119,7 +137,7 @@ class Document
                 'status' => $doc['status'],
                 'uploaded_at' => $doc['uploaded_at'],
                 'archived' => $doc['archived'],
-                'deleted_at' => new \MongoDB\BSON\UTCDateTime()
+                'deleted_at' => new UTCDateTime()
             ]);
             if ($result->getInsertedCount() === 1) {
                 $this->documentsCollection->deleteOne(['_id' => new ObjectId($documentId)]);
@@ -168,7 +186,7 @@ class Document
                 'status' => 'rejected',
                 'uploaded_at' => $doc['uploaded_at'],
                 'archived' => $doc['archived'],
-                'deleted_at' => new \MongoDB\BSON\UTCDateTime()
+                'deleted_at' => new UTCDateTime()
             ]);
             if ($result->getInsertedCount() === 1) {
                 $this->documentsCollection->deleteOne(['_id' => new ObjectId($documentId)]);
@@ -215,7 +233,7 @@ class Document
     public function search($keyword, $category, $metadata, $dateRange, $sort = ['uploaded_at' => -1], $limit = 10)
     {
         try {
-            $query = ['status' => 'approved']; // Only approved documents
+            $query = ['status' => 'approved', 'archived' => false]; // Only approved, non-archived documents
             if (isset($_SESSION['user_id']) && !$this->isAdmin()) {
                 $query['user_id'] = $_SESSION['user_id'];
             }
@@ -238,8 +256,8 @@ class Document
                 $start = filter_var($dateRange['start'], FILTER_SANITIZE_STRING);
                 $end = filter_var($dateRange['end'], FILTER_SANITIZE_STRING);
                 $query['uploaded_at'] = [
-                    '$gte' => new \MongoDB\BSON\UTCDateTime(strtotime($start) * 1000),
-                    '$lte' => new \MongoDB\BSON\UTCDateTime(strtotime($end) * 1000)
+                    '$gte' => new UTCDateTime(strtotime($start) * 1000),
+                    '$lte' => new UTCDateTime(strtotime($end) * 1000)
                 ];
             }
             return $this->documentsCollection->find($query, ['sort' => $sort, 'limit' => $limit]);
@@ -268,6 +286,22 @@ class Document
             return iterator_to_array($this->trashCollection->find(['user_id' => $userId]));
         } catch (\Exception $e) {
             error_log("Get trashed documents error: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    public function getArchivedDocuments($userId, $limit = 10, $skip = 0)
+    {
+        try {
+            if (!preg_match('/^[a-f\d]{24}$/i', $userId)) {
+                return [];
+            }
+            return iterator_to_array($this->documentsCollection->find(
+                ['user_id' => $userId, 'archived' => true, 'status' => 'approved'],
+                ['sort' => ['uploaded_at' => -1], 'limit' => $limit, 'skip' => $skip]
+            ));
+        } catch (\Exception $e) {
+            error_log("Get archived documents error: " . $e->getMessage());
             return [];
         }
     }
