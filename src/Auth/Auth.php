@@ -94,6 +94,16 @@ class Auth
         }
     }
 
+    public function getUsers()
+{
+    try {
+        return iterator_to_array($this->usersCollection->find());
+    } catch (\Exception $e) {
+        error_log("Get users error: " . $e->getMessage());
+        return [];
+    }
+}
+
     public function login($email, $password)
     {
         try {
