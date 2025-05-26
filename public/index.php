@@ -81,12 +81,10 @@ case 'login':
                 $error = 'Too many failed login attempts. Try again in 3 minutes.';
             } else {
                 if ($auth->login($email, $password)) {
-                    $auth->clearLoginAttempts($email, $ip);
                     header('Location: ?action=dashboard');
                     exit;
                 } else {
-                    $auth->recordFailedLogin($email, $ip);
-                    $error = 'Invalid email or password.';
+                    $error = $_SESSION['error'] ?? 'Invalid email or password.';
                 }
             }
         } else {

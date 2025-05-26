@@ -427,45 +427,57 @@ public function clearLoginAttempts($email, $ip)
      * Authenticate a user
      * @return bool
      */
-    public function login($email, $password)
-    {
-        try {
-            $email = filter_var($email, FILTER_SANITIZE_EMAIL);
-            $ip = $_SERVER['REMOTE_ADDR'];
+public function login($email, $password)
+{
+    try {
+        $email = filter_var($email, FILTER_SANITIZE_EMAIL);
+        $ip = $_SERVER['REMOTE_ADDR'];
 
-            [$isAllowed, $errorMessage] = $this->checkLoginAttempts($ip, $email);
-            if (!$isAllowed) {
-                $_SESSION['error'] = $errorMessage;
-                return false;
-            }
-
-            $user = $this->usersCollection->findOne(['email' => $email]);
-            if ($user && password_verify($password, $user['password'])) {
-                $this->loginAttemptsCollection->deleteMany([
-                    '$or' => [
-                        ['ip' => $ip],
-                        ['email' => $email]
-                    ]
-                ]);
-
-                session_regenerate_id(true);
-                $_SESSION['user_id'] = (string) $user['_id'];
-                $_SESSION['last_activity'] = time();
-                $_SESSION['permissions'] = isset($user['permissions']) && is_array($user['permissions'])
-                    ? array_intersect($user['permissions'], VALID_PERMISSIONS)
-                    : VALID_PERMISSIONS;
-                return true;
-            }
-
-            $this->recordLoginAttempt($ip, $email);
-            $_SESSION['error'] = "Invalid email or password.";
-            return false;
-        } catch (\Exception $e) {
-            error_log("Login error: " . $e->getMessage());
-            $_SESSION['error'] = "Login failed due to a server error.";
+        if ($this->isLoginLockedOut($email, $ip)) {
+            $_SESSION['error'] = "Too many failed login attempts. Try again in 3 minutes.";
+            $this->logLoginAttempt($email, $ip, $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown', false);
             return false;
         }
+
+        $user = $this->usersCollection->findOne(['email' => $email]);
+        if ($user && password_verify($password, $user['password'])) {
+            session_regenerate_id(true);
+            $_SESSION['user_id'] = (string) $user['_id'];
+            $_SESSION['last_activity'] = time();
+            $_SESSION['permissions'] = isset($user['permissions']) && is_array($user['permissions'])
+                ? array_intersect($user['permissions'], VALID_PERMISSIONS)
+                : VALID_PERMISSIONS;
+            $this->clearLoginAttempts($email, $ip);
+            $this->logLoginAttempt($email, $ip, $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown', true);
+            return true;
+        }
+
+        $this->recordFailedLogin($email, $ip);
+        $this->logLoginAttempt($email, $ip, $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown', false);
+        $_SESSION['error'] = "Invalid email or password.";
+        return false;
+    } catch (\Exception $e) {
+        error_log("Login error: " . $e->getMessage());
+        $_SESSION['error'] = "Login failed due to a server error.";
+        $this->logLoginAttempt($email, $ip, $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown', false);
+        return false;
     }
+}
+
+private function logLoginAttempt($email, $ip, $userAgent, $success)
+{
+    try {
+        $this->loginAttemptsCollection->insertOne([
+            'email' => $email,
+            'ip' => $ip,
+            'user_agent' => $userAgent,
+            'timestamp' => new \MongoDB\BSON\UTCDateTime(),
+            'success' => $success
+        ]);
+    } catch (\Exception $e) {
+        error_log("Log login attempt error: " . $e->getMessage());
+    }
+}
 
     /**
      * Log out the current user
