@@ -3,7 +3,6 @@
 
 // Ensure session is started
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
 }
 
 // Validate session and admin privileges
