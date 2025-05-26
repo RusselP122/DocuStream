@@ -71,24 +71,31 @@ switch ($action) {
         include __DIR__ . '/../templates/auth/register.php';
         break;
 
-    case 'login':
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
-            $password = $_POST['password'] ?? '';
-            if ($email && $password) {
+case 'login':
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
+        $password = $_POST['password'] ?? '';
+        $ip = $_SERVER['REMOTE_ADDR'];
+        if ($email && $password) {
+            if ($auth->isLoginLockedOut($email, $ip)) {
+                $error = 'Too many failed login attempts. Try again in 3 minutes.';
+            } else {
                 if ($auth->login($email, $password)) {
+                    $auth->clearLoginAttempts($email, $ip);
                     header('Location: ?action=dashboard');
                     exit;
                 } else {
+                    $auth->recordFailedLogin($email, $ip);
                     $error = 'Invalid email or password.';
                 }
-            } else {
-                $error = 'Email and password are required.';
             }
+        } else {
+            $error = 'Email and password are required.';
         }
-        include __DIR__ . '/../templates/auth/login.php';
-        break;
-
+    }
+    include __DIR__ . '/../templates/auth/login.php';
+    break;
+    
     case 'logout':
         $auth->logout();
         $_SESSION['message'] = 'Logged out successfully.';
