@@ -53,7 +53,6 @@ public function isLoginLockedOut($email, $ip)
                 if (time() - $lastFailedTime < $this->lockoutTime) {
                     return true;
                 } else {
-                    // Reset attempts after lockout expires
                     $this->clearLoginAttempts($email, $ip);
                 }
             }
@@ -68,10 +67,18 @@ public function isLoginLockedOut($email, $ip)
 public function clearLoginAttempts($email, $ip)
 {
     try {
-        $this->usersCollection->updateOne(
+        // Reset in users collection
+        $result = $this->usersCollection->updateOne(
             ['email' => $email],
             ['$set' => ['login_attempts' => 0, 'last_failed_login' => null]]
         );
+        error_log("Cleared login attempts for email=$email in users collection: " . $result->getModifiedCount());
+
+        // Clear in login_attempts collection
+        $result = $this->loginAttemptsCollection->deleteMany([
+            '$or' => [['email' => $email], ['ip' => $ip]]
+        ]);
+        error_log("Cleared login attempts for email=$email, ip=$ip in login_attempts collection: " . $result->getDeletedCount());
     } catch (\Exception $e) {
         error_log("Clear login attempts error: " . $e->getMessage());
     }
@@ -432,10 +439,11 @@ public function login($email, $password)
     try {
         $email = filter_var($email, FILTER_SANITIZE_EMAIL);
         $ip = $_SERVER['REMOTE_ADDR'];
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
 
         if ($this->isLoginLockedOut($email, $ip)) {
             $_SESSION['error'] = "Too many failed login attempts. Try again in 3 minutes.";
-            $this->logLoginAttempt($email, $ip, $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown', false);
+            $this->logLoginAttempt($email, $ip, $userAgent, false);
             return false;
         }
 
@@ -448,18 +456,18 @@ public function login($email, $password)
                 ? array_intersect($user['permissions'], VALID_PERMISSIONS)
                 : VALID_PERMISSIONS;
             $this->clearLoginAttempts($email, $ip);
-            $this->logLoginAttempt($email, $ip, $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown', true);
+            $this->logLoginAttempt($email, $ip, $userAgent, true);
             return true;
         }
 
         $this->recordFailedLogin($email, $ip);
-        $this->logLoginAttempt($email, $ip, $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown', false);
+        $this->logLoginAttempt($email, $ip, $userAgent, false);
         $_SESSION['error'] = "Invalid email or password.";
         return false;
     } catch (\Exception $e) {
         error_log("Login error: " . $e->getMessage());
         $_SESSION['error'] = "Login failed due to a server error.";
-        $this->logLoginAttempt($email, $ip, $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown', false);
+        $this->logLoginAttempt($email, $ip, $userAgent, false);
         return false;
     }
 }
@@ -478,6 +486,7 @@ private function logLoginAttempt($email, $ip, $userAgent, $success)
         error_log("Log login attempt error: " . $e->getMessage());
     }
 }
+
 
     /**
      * Log out the current user

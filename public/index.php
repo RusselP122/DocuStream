@@ -93,7 +93,7 @@ case 'login':
     }
     include __DIR__ . '/../templates/auth/login.php';
     break;
-    
+        
     case 'logout':
         $auth->logout();
         $_SESSION['message'] = 'Logged out successfully.';
