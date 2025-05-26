@@ -1,220 +1,423 @@
 <?php
-// templates/admin/index.php
-
-// Ensure session is started
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+session_start();
+if (isset($_SESSION['last_activity'])) {
+    $_SESSION['last_activity'] = time();
 }
 
-// Validate session and admin privileges
-if (!isset($_SESSION['user_id']) || !isset($auth) || !$auth->isAdmin()) {
-    $_SESSION['error'] = 'You must be logged in as an admin to access this page.';
+require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/../src/Auth/Auth.php';
+require_once __DIR__ . '/../src/Document/Document.php';
+
+use DocuStream\Auth\Auth;
+use DocuStream\Document\Document;
+
+try {
+    $auth = new Auth();
+    $document = new Document();
+} catch (\Exception $e) {
+    error_log("Initialization error: " . $e->getMessage());
+    $_SESSION['error'] = 'System error. Please try again later.';
     header('Location: ?action=login');
-    exit();
+    exit;
 }
 
-// CSRF token generation
+// Generate CSRF token if not set
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
-?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DocuStream - Admin Panel</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        function confirmAction(message) {
-            return confirm(message);
+$action = filter_input(INPUT_GET, 'action', FILTER_SANITIZE_STRING) ?? 'dashboard';
+$protectedActions = [
+    'dashboard', 'upload', 'search', 'admin', 'edit_user',
+    'view', 'download', 'archive', 'unarchive', 'delete', 'restore',
+    'approve_document', 'reject_document'
+];
+
+if (in_array($action, $protectedActions) && !$auth->isAuthenticated()) {
+    $_SESSION['error'] = 'Please log in to access this page.';
+    header('Location: ?action=login');
+    exit;
+}
+
+// Centralized permission check
+function requirePermission(Auth $auth, string $permission, string $redirect = '?action=dashboard'): void
+{
+    if (!$auth->hasPermission($permission)) {
+        $_SESSION['error'] = 'Permission denied.';
+        header("Location: $redirect");
+        exit;
+    }
+}
+
+switch ($action) {
+    case 'register':
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $username = filter_input(INPUT_POST, 'username', FILTER_SANITIZE_STRING);
+            $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
+            $password = $_POST['password'] ?? '';
+            if ($username && $email && $password) {
+                if ($auth->register($username, $email, $password)) {
+                    $_SESSION['message'] = 'Registration successful. Please log in.';
+                    header('Location: ?action=login');
+                    exit;
+                } else {
+                    $error = 'Registration failed. Email may already be in use.';
+                }
+            } else {
+                $error = 'All fields are required.';
+            }
         }
-    </script>
-</head>
-<body class="bg-gray-50 min-h-screen">
-    <?php include dirname(__DIR__) . '/partials/header.php'; ?>
+        include __DIR__ . '/../templates/auth/register.php';
+        break;
 
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <?php if (isset($_SESSION['message'])): ?>
-            <div class="mb-4 p-4 bg-green-100 text-green-700 rounded-lg text-center" role="alert">
-                <?php echo htmlspecialchars($_SESSION['message'], ENT_QUOTES, 'UTF-8'); ?>
-                <?php unset($_SESSION['message']); ?>
-            </div>
-        <?php endif; ?>
-        <?php if (isset($_SESSION['error'])): ?>
-            <div class="mb-4 p-4 bg-red-100 text-red-700 rounded-lg text-center" role="alert">
-                <?php echo htmlspecialchars($_SESSION['error'], ENT_QUOTES, 'UTF-8'); ?>
-                <?php unset($_SESSION['error']); ?>
-            </div>
-        <?php endif; ?>
+case 'login':
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
+        $password = $_POST['password'] ?? '';
+        $ip = $_SERVER['REMOTE_ADDR'];
+        if ($email && $password) {
+            if ($auth->isLoginLockedOut($email, $ip)) {
+                $error = 'Too many failed login attempts. Try again in 3 minutes.';
+            } else {
+                if ($auth->login($email, $password)) {
+                    $auth->clearLoginAttempts($email, $ip);
+                    header('Location: ?action=dashboard');
+                    exit;
+                } else {
+                    $auth->recordFailedLogin($email, $ip);
+                    $error = 'Invalid email or password.';
+                }
+            }
+        } else {
+            $error = 'Email and password are required.';
+        }
+    }
+    include __DIR__ . '/../templates/auth/login.php';
+    break;
+    
+    case 'logout':
+        $auth->logout();
+        $_SESSION['message'] = 'Logged out successfully.';
+        header('Location: ?action=login');
+        exit;
 
-        <div class="bg-white shadow rounded-lg mb-6">
-            <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
-                <h3 class="text-lg leading-6 font-medium text-gray-900">User Management</h3>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200" aria-label="User management table">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Username
-                            </th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Email
-                            </th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Role
-                            </th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Permissions
-                            </th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Actions
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                        <?php if (isset($users) && is_array($users) && !empty($users)): ?>
-                            <?php foreach ($users as $user): ?>
-                                <tr>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                        <?php echo htmlspecialchars($user['username'] ?? 'N/A', ENT_QUOTES, 'UTF-8'); ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <?php echo htmlspecialchars($user['email'] ?? 'N/A', ENT_QUOTES, 'UTF-8'); ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <?php echo !empty($user['isAdmin']) && $user['isAdmin'] ? 'Admin' : 'User'; ?>
-                                    </td>
-                                    <td class="px-6 py-4 text-sm">
-                                        <div class="flex flex-wrap gap-2">
-                                            <?php
-                                            // Use permissions as-is (already a PHP array)
-                                            $userPermissions = is_array($user['permissions']) ? $user['permissions'] : [];
-                                            
-                                            // Define badge colors for permissions
-                                            $colorMap = [
-                                                'upload' => 'blue',
-                                                'view' => 'purple',
-                                                'download' => 'indigo',
-                                                'archive' => 'yellow',
-                                                'delete' => 'red'
-                                            ];
-                                            
-                                            // If user has permissions, display them; otherwise, show "None"
-                                            if (!empty($userPermissions)) {
-                                                foreach ($userPermissions as $perm) {
-                                                    // Only display valid permissions
-                                                    if (in_array($perm, \DocuStream\Auth\VALID_PERMISSIONS)) {
-                                                        $color = $colorMap[$perm] ?? 'gray';
-                                                        $badgeClass = "bg-{$color}-100 text-{$color}-800";
-                                                        ?>
-                                                        <span class="px-2.5 py-1.5 rounded-full text-xs font-medium <?php echo $badgeClass; ?>">
-                                                            <svg class="w-4 h-4 inline mr-1.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                                                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                                                            </svg>
-                                                            <?php echo ucfirst(htmlspecialchars($perm, ENT_QUOTES, 'UTF-8')); ?>
-                                                        </span>
-                                                        <?php
-                                                    }
-                                                }
-                                            } else {
-                                                ?>
-                                                <span class="px-2.5 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-400">
-                                                    None
-                                                </span>
-                                                <?php
-                                            }
-                                            ?>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                        <a href="?action=edit_user&id=<?php echo htmlspecialchars((string)($user['_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" class="text-blue-600 hover:text-blue-900">Edit</a>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php else: ?>
-                            <tr>
-                                <td colspan="5" class="px-6 py-4 text-sm text-gray-500 text-center">No users found.</td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    case 'forgot_password':
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
+            if ($email) {
+                if ($auth->initiatePasswordReset($email)) {
+                    $message = 'Password reset link sent to your email.';
+                } else {
+                    $error = 'Failed to send reset link. Please check your email.';
+                }
+            } else {
+                $error = 'Email is required.';
+            }
+        }
+        include __DIR__ . '/../templates/auth/forgot_password.php';
+        break;
 
-        <?php if (isset($pendingDocuments) && is_array($pendingDocuments) && !empty($pendingDocuments)): ?>
-            <div class="bg-white shadow rounded-lg">
-                <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
-                    <h3 class="text-lg leading-6 font-medium text-gray-900">Pending Documents</h3>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200" aria-label="Pending documents table">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Name
-                                </th>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Category
-                                </th>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Uploaded By
-                                </th>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Date
-                                </th>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Actions
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
-                            <?php foreach ($pendingDocuments as $doc): ?>
-                                <tr>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                        <?php echo htmlspecialchars($doc['original_name'] ?? 'N/A', ENT_QUOTES, 'UTF-8'); ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <?php echo htmlspecialchars($doc['category'] ?? 'N/A', ENT_QUOTES, 'UTF-8'); ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <?php
-                                        $uploader = isset($doc['user_id']) ? $auth->getUserById($doc['user_id']) : null;
-                                        echo $uploader ? htmlspecialchars($uploader['username'], ENT_QUOTES, 'UTF-8') : 'Unknown User';
-                                        ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <?php
-                                        $date = isset($doc['uploaded_at']) && method_exists($doc['uploaded_at'], 'toDateTime')
-                                            ? $doc['uploaded_at']->toDateTime()->format('Y-m-d H:i')
-                                            : 'N/A';
-                                        echo htmlspecialchars($date, ENT_QUOTES, 'UTF-8');
-                                        ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <a href="?action=view&id=<?php echo htmlspecialchars((string)($doc['_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" class="text-blue-600 hover:text-blue-900 mr-3">View</a>
-                                        <a href="?action=approve_document&id=<?php echo htmlspecialchars((string)($doc['_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>&csrf_token=<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>"
-                                           onclick="return confirmAction('Are you sure you want to approve this document?');"
-                                           class="text-green-600 hover:text-green-900 mr-3">Approve</a>
-                                        <a href="?action=reject_document&id=<?php echo htmlspecialchars((string)($doc['_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>&csrf_token=<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>"
-                                           onclick="return confirmAction('Are you sure you want to permanently delete this document? This action cannot be undone.');"
-                                           class="text-red-600 hover:text-red-900">Reject</a>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        <?php else: ?>
-            <div class="bg-white shadow rounded-lg p-6 text-center">
-                <p class="text-sm text-gray-500">No pending documents found.</p>
-            </div>
-        <?php endif; ?>
-    </main>
+    case 'reset_password':
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $token = filter_input(INPUT_POST, 'token', FILTER_SANITIZE_STRING);
+            $password = $_POST['password'] ?? '';
+            if ($token && $password) {
+                if ($auth->resetPassword($token, $password)) {
+                    $_SESSION['message'] = 'Password reset successful. Please log in.';
+                    header('Location: ?action=login');
+                    exit;
+                } else {
+                    $error = 'Invalid or expired reset token.';
+                }
+            } else {
+                $error = 'Token and password are required.';
+            }
+        }
+        include __DIR__ . '/../templates/auth/reset_password.php';
+        break;
 
-    <?php include dirname(__DIR__) . '/partials/footer.php'; ?>
-</body>
-</html>
+    case 'dashboard':
+        include __DIR__ . '/../templates/dashboard/index.php';
+        break;
+
+    case 'upload':
+        requirePermission($auth, 'upload');
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if (!$auth->validateCsrfToken($_POST['csrf_token'] ?? '')) {
+                $_SESSION['error'] = 'Invalid CSRF token.';
+                header('Location: ?action=dashboard');
+                exit;
+            }
+            $file = $_FILES['document'] ?? null;
+            $category = filter_input(INPUT_POST, 'category', FILTER_SANITIZE_STRING);
+            $metadata = isset($_POST['metadata']) && is_array($_POST['metadata'])
+                ? array_map('filter_var', $_POST['metadata'], array_fill(0, count($_POST['metadata']), FILTER_SANITIZE_STRING))
+                : [];
+            $requiresApproval = !$auth->isAdmin();
+            $result = $document->upload($file, $category, $metadata, $_SESSION['user_id'], $requiresApproval);
+            $_SESSION[$result['success'] ? 'message' : 'error'] = $result['message'];
+            header('Location: ?action=dashboard');
+            exit;
+        }
+        include __DIR__ . '/../templates/dashboard/index.php';
+        break;
+
+    case 'search':
+        requirePermission($auth, 'view');
+        try {
+            $keyword = filter_input(INPUT_GET, 'keyword', FILTER_SANITIZE_STRING) ?? '';
+            $category = filter_input(INPUT_GET, 'category', FILTER_SANITIZE_STRING) ?? '';
+            $metadata = isset($_GET['metadata']) && is_array($_GET['metadata'])
+                ? array_map('filter_var', $_GET['metadata'], array_fill(0, count($_GET['metadata']), FILTER_SANITIZE_STRING))
+                : [];
+            $dateRange = isset($_GET['date_range']) && is_array($_GET['date_range'])
+                ? array_map('filter_var', $_GET['date_range'], array_fill(0, count($_GET['date_range']), FILTER_SANITIZE_STRING))
+                : [];
+            $sortBy = filter_input(INPUT_GET, 'sort_by', FILTER_SANITIZE_STRING) ?? 'uploaded_at';
+            $sortOrder = filter_input(INPUT_GET, 'sort_order', FILTER_SANITIZE_STRING) === 'asc' ? 1 : -1;
+            $docsPerPage = 10;
+            $currentPage = max(1, (int)(filter_input(INPUT_GET, 'page', FILTER_SANITIZE_NUMBER_INT) ?? 1));
+            $skip = ($currentPage - 1) * $docsPerPage;
+            $sort = [$sortBy => $sortOrder];
+            $results = iterator_to_array($document->search($keyword, $category, $metadata, $dateRange, $sort, $docsPerPage));
+            include __DIR__ . '/../templates/dashboard/search.php';
+        } catch (\Exception $e) {
+            error_log("Search error: " . $e->getMessage());
+            $_SESSION['error'] = 'An error occurred while searching documents.';
+            $results = [];
+            include __DIR__ . '/../templates/dashboard/search.php';
+        }
+        break;
+
+    case 'view':
+        requirePermission($auth, 'view');
+        $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+        if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId)) {
+            $doc = $document->getDocument($documentId);
+            if ($doc && ($doc['user_id'] === $_SESSION['user_id'] || $auth->isAdmin())) {
+                $filePath = UPLOAD_DIR . $doc['file_name'];
+                if (file_exists($filePath)) {
+                    $fileType = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+                    if ($fileType === 'pdf') {
+                        header('Content-Type: application/pdf');
+                        header('Content-Disposition: inline; filename="' . $doc['original_name'] . '"');
+                        readfile($filePath);
+                        exit;
+                    } elseif ($fileType === 'txt') {
+                        $content = file_get_contents($filePath);
+                        include __DIR__ . '/../templates/dashboard/view_text.php';
+                        exit;
+                    } else {
+                        $_SESSION['error'] = 'This file type can only be downloaded.';
+                    }
+                } else {
+                    $_SESSION['error'] = 'File not found.';
+                }
+            } else {
+                $_SESSION['error'] = 'Document not found or access denied.';
+            }
+        } else {
+            $_SESSION['error'] = 'Invalid document ID.';
+        }
+        header('Location: ?action=dashboard');
+        exit;
+
+    case 'download':
+        requirePermission($auth, 'download');
+        $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+        if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId)) {
+            $doc = $document->getDocument($documentId);
+            if ($doc && ($doc['user_id'] === $_SESSION['user_id'] || $auth->isAdmin())) {
+                $filePath = UPLOAD_DIR . $doc['file_name'];
+                if (file_exists($filePath)) {
+                    header('Content-Type: application/octet-stream');
+                    header('Content-Disposition: attachment; filename="' . $doc['original_name'] . '"');
+                    header('Content-Length: ' . filesize($filePath));
+                    readfile($filePath);
+                    exit;
+                }
+            }
+            $_SESSION['error'] = 'Document not found or access denied.';
+        } else {
+            $_SESSION['error'] = 'Invalid document ID.';
+        }
+        header('Location: ?action=dashboard');
+        exit;
+
+    case 'archive':
+        requirePermission($auth, 'archive');
+        $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+        if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId)) {
+            if ($document->archive($documentId)) {
+                $_SESSION['message'] = 'Document archived successfully.';
+            } else {
+                $_SESSION['error'] = 'Failed to archive document.';
+            }
+        } else {
+            $_SESSION['error'] = 'Invalid document ID.';
+        }
+        header('Location: ?action=dashboard');
+        exit;
+
+    case 'unarchive':
+        requirePermission($auth, 'archive');
+        $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+        if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId)) {
+            if ($document->unarchive($documentId)) {
+                $_SESSION['message'] = 'Document unarchived successfully.';
+            } else {
+                $_SESSION['error'] = 'Failed to unarchive document.';
+            }
+        } else {
+            $_SESSION['error'] = 'Invalid document ID.';
+        }
+        header('Location: ?action=dashboard');
+        exit;
+
+    case 'delete':
+        requirePermission($auth, 'delete');
+        $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+        if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId)) {
+            if ($document->delete($documentId)) {
+                $_SESSION['message'] = 'Document moved to trash.';
+            } else {
+                $_SESSION['error'] = 'Failed to delete document.';
+            }
+        } else {
+            $_SESSION['error'] = 'Invalid document ID.';
+        }
+        header('Location: ?action=dashboard');
+        exit;
+
+    case 'restore':
+        requirePermission($auth, 'delete');
+        $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+        if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId)) {
+            if ($document->restore($documentId)) {
+                $_SESSION['message'] = 'Document restored successfully.';
+            } else {
+                $_SESSION['error'] = 'Failed to restore document.';
+            }
+        } else {
+            $_SESSION['error'] = 'Invalid document ID.';
+        }
+        header('Location: ?action=dashboard');
+        exit;
+
+        
+    case 'approve_document':
+        if ($auth->isAdmin()) {
+            $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+            $csrfToken = filter_input(INPUT_GET, 'csrf_token', FILTER_SANITIZE_STRING);
+            if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId) && $auth->validateCsrfToken($csrfToken)) {
+                if ($document->approveDocument($documentId)) {
+                    $_SESSION['message'] = 'Document approved successfully.';
+                } else {
+                    $_SESSION['error'] = 'Failed to approve document.';
+                }
+            } else {
+                $_SESSION['error'] = 'Invalid document ID or CSRF token.';
+            }
+            header('Location: ?action=admin');
+            exit;
+        }
+        $_SESSION['error'] = 'Admin access required.';
+        header('Location: ?action=dashboard');
+        exit;
+
+    case 'reject_document':
+        if ($auth->isAdmin()) {
+            $documentId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+            $csrfToken = filter_input(INPUT_GET, 'csrf_token', FILTER_SANITIZE_STRING);
+            if ($documentId && preg_match('/^[a-f\d]{24}$/i', $documentId) && $auth->validateCsrfToken($csrfToken)) {
+                if ($document->rejectDocument($documentId)) {
+                    $_SESSION['message'] = 'Document rejected and moved to trash.';
+                } else {
+                    $_SESSION['error'] = 'Failed to reject document.';
+                }
+            } else {
+                $_SESSION['error'] = 'Invalid document ID or CSRF token.';
+            }
+            header('Location: ?action=admin');
+            exit;
+        }
+        $_SESSION['error'] = 'Admin access required.';
+        header('Location: ?action=dashboard');
+        exit;
+
+    case 'admin':
+        if ($auth->isAdmin()) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                $csrfToken = filter_input(INPUT_POST, 'csrf_token', FILTER_SANITIZE_STRING);
+                if (!$auth->validateCsrfToken($csrfToken)) {
+                    $_SESSION['error'] = 'Invalid CSRF token.';
+                    header('Location: ?action=admin');
+                    exit;
+                }
+                $userId = filter_input(INPUT_POST, 'user_id', FILTER_SANITIZE_STRING);
+                if ($userId && preg_match('/^[a-f\d]{24}$/i', $userId)) {
+                    $updates = [
+                        'username' => filter_input(INPUT_POST, 'username', FILTER_SANITIZE_STRING),
+                        'email' => filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL),
+                        'isAdmin' => filter_var(isset($_POST['is_admin']), FILTER_VALIDATE_BOOLEAN),
+                        'permissions' => isset($_POST['permissions']) && is_array($_POST['permissions'])
+                            ? array_intersect($_POST['permissions'], VALID_PERMISSIONS)
+                            : []
+                    ];
+                    if (!empty($_POST['password'])) {
+                        $updates['password'] = $_POST['password'];
+                    }
+                    if ($updates['username'] && $updates['email']) {
+                        if ($auth->manageUser($userId, $updates, $_SESSION['user_id'])) {
+                            $_SESSION['message'] = 'User updated successfully.';
+                        } else {
+                            $_SESSION['error'] = 'Failed to update user. Ensure the email is unique and you are not removing your own admin status.';
+                        }
+                    } else {
+                        $_SESSION['error'] = 'Username and email are required.';
+                    }
+                } else {
+                    $_SESSION['error'] = 'Invalid user ID.';
+                }
+                header('Location: ?action=admin');
+                exit;
+            }
+            $users = $auth->getUsers();
+            $pendingDocuments = iterator_to_array($document->getPendingDocuments());
+            include __DIR__ . '/../templates/admin/index.php';
+        } else {
+            $_SESSION['error'] = 'Admin access required.';
+            header('Location: ?action=dashboard');
+            exit;
+        }
+        break;
+
+    case 'edit_user':
+        if ($auth->isAdmin()) {
+            $userId = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_STRING);
+            if ($userId && preg_match('/^[a-f\d]{24}$/i', $userId)) {
+                $user = $auth->getUserById($userId);
+                if ($user) {
+                    include __DIR__ . '/../templates/admin/edit_user.php';
+                    exit;
+                }
+                $_SESSION['error'] = 'User not found.';
+            } else {
+                $_SESSION['error'] = 'Invalid user ID.';
+            }
+            header('Location: ?action=admin');
+            exit;
+        }
+        $_SESSION['error'] = 'Admin access required.';
+        header('Location: ?action=dashboard');
+        exit;
+
+    default:
+        if ($auth->isAuthenticated()) {
+            header('Location: ?action=dashboard');
+        } else {
+            header('Location: ?action=login');
+        }
+        exit;
+}

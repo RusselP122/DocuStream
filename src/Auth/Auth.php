@@ -20,6 +20,63 @@ class Auth
     private $usersCollection;
     private $loginAttemptsCollection;
     private $registerAttemptsCollection;
+    private $maxLoginAttempts = 5;
+    private $lockoutTime = 180; 
+
+public function recordFailedLogin($email, $ip)
+{
+    try {
+        $this->usersCollection->updateOne(
+            ['email' => $email],
+            [
+                '$inc' => ['login_attempts' => 1],
+                '$set' => [
+                    'last_failed_login' => new \MongoDB\BSON\UTCDateTime(),
+                    'last_failed_ip' => $ip
+                ]
+            ],
+            ['upsert' => true]
+        );
+    } catch (\Exception $e) {
+        error_log("Record failed login error: " . $e->getMessage());
+    }
+}
+
+public function isLoginLockedOut($email, $ip)
+{
+    try {
+        $user = $this->usersCollection->findOne(['email' => $email]);
+        if ($user && isset($user['login_attempts']) && $user['login_attempts'] >= $this->maxLoginAttempts) {
+            $lastFailed = $user['last_failed_login'] ?? null;
+            if ($lastFailed instanceof \MongoDB\BSON\UTCDateTime) {
+                $lastFailedTime = $lastFailed->toDateTime()->getTimestamp();
+                if (time() - $lastFailedTime < $this->lockoutTime) {
+                    return true;
+                } else {
+                    // Reset attempts after lockout expires
+                    $this->clearLoginAttempts($email, $ip);
+                }
+            }
+        }
+        return false;
+    } catch (\Exception $e) {
+        error_log("Check lockout error: " . $e->getMessage());
+        return false;
+    }
+}
+
+public function clearLoginAttempts($email, $ip)
+{
+    try {
+        $this->usersCollection->updateOne(
+            ['email' => $email],
+            ['$set' => ['login_attempts' => 0, 'last_failed_login' => null]]
+        );
+    } catch (\Exception $e) {
+        error_log("Clear login attempts error: " . $e->getMessage());
+    }
+}
+
 
     public function __construct()
     {
